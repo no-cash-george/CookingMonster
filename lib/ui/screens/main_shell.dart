@@ -45,7 +45,7 @@ class _MainShellState extends State<MainShell> {
 
     final pages = [
       RecipesScreen(appState: widget.appState),
-      ReceiveScreen(appState: widget.appState),
+      ReceiveScreen(appState: widget.appState, isActive: _selectedIndex == 1),
       SettingsScreen(appState: widget.appState),
     ];
 
@@ -55,7 +55,6 @@ class _MainShellState extends State<MainShell> {
         body: Stack(
           children: [
             IndexedStack(index: _selectedIndex, children: pages),
-            // Floating Liquid Glass Action Buttons positioned cleanly above the bottom bar & Home Indicator
             if (_selectedIndex == 0)
               Positioned(
                 left: 20,

@@ -7,78 +7,175 @@ import '../../models/recipe.dart';
 import '../../services/share_codec.dart';
 import '../../state/app_state.dart';
 import '../widgets/platform_primitives.dart';
-import 'ai_import_screen.dart';
 
 class ReceiveScreen extends StatefulWidget {
   final AppState appState;
-  const ReceiveScreen({super.key, required this.appState});
+  final bool isActive;
+
+  const ReceiveScreen({super.key, required this.appState, required this.isActive});
 
   @override
   State<ReceiveScreen> createState() => _ReceiveScreenState();
 }
 
-class _ReceiveScreenState extends State<ReceiveScreen> {
-  bool _isProcessing = false;
+class _ReceiveScreenState extends State<ReceiveScreen> with WidgetsBindingObserver {
+  late final MobileScannerController _scannerController;
+  final TextEditingController _codeController = TextEditingController();
 
-  void _openImportFromAi() {
-    final isApple = widget.appState.isAppleStyle(context);
-    Navigator.of(context).push(
-      isApple
-          ? CupertinoPageRoute(builder: (_) => AiImportScreen(appState: widget.appState))
-          : MaterialPageRoute(builder: (_) => AiImportScreen(appState: widget.appState)),
+  bool _isCameraActive = false;
+  bool _isDialogOpen = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scannerController = MobileScannerController(
+      autoStart: false,
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      formats: const [BarcodeFormat.qrCode],
     );
+
+    if (widget.isActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.isActive) {
+          _startCamera();
+        }
+      });
+    }
   }
 
-  Future<void> _handleIncomingPayload(String rawPayload) async {
-    if (_isProcessing) return;
-    _isProcessing = true;
+  @override
+  void didUpdateWidget(covariant ReceiveScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive != oldWidget.isActive) {
+      if (widget.isActive) {
+        _startCamera();
+      } else {
+        _stopCamera();
+      }
+    }
+  }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!widget.isActive) return;
+
+    if (state == AppLifecycleState.resumed) {
+      _startCamera();
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _stopCamera();
+    }
+  }
+
+  Future<void> _startCamera() async {
+    if (_isCameraActive || !mounted || !widget.isActive) return;
+    _isCameraActive = true;
     try {
-      final recipe = ShareCodec.decode(rawPayload);
-      if (!mounted) return;
+      await _scannerController.start();
+    } catch (_) {
+      _isCameraActive = false;
+    }
+  }
 
-      final confirmed = await _showImportConfirmation(recipe);
-      if (confirmed == true && mounted) {
-        await widget.appState.saveRecipe(recipe);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Imported "${recipe.displayTitleWithAuthor}"')));
+  Future<void> _stopCamera() async {
+    if (!_isCameraActive) return;
+    _isCameraActive = false;
+    try {
+      await _scannerController.stop();
+    } catch (_) {
+      // Ignore stop errors if the platform view was already torn down.
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _codeController.dispose();
+    _scannerController.dispose();
+    super.dispose();
+  }
+
+  void _onBarcodeDetect(BarcodeCapture capture) {
+    if (!widget.isActive || _isDialogOpen) return;
+
+    for (final barcode in capture.barcodes) {
+      final raw = barcode.rawValue;
+      if (raw != null && raw.trim().startsWith('cm1:')) {
+        _handleIncomingPayload(raw.trim());
+        break;
       }
-    } on FormatException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    } finally {
-      await Future.delayed(const Duration(milliseconds: 900));
-      _isProcessing = false;
     }
   }
 
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = data?.text;
-    if (text == null || text.trim().isEmpty) {
+    final text = data?.text?.trim() ?? '';
+    if (text.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Clipboard is empty.')));
+      setState(() => _errorMessage = 'Your clipboard is empty.');
       return;
     }
+
+    _codeController.text = text;
     await _handleIncomingPayload(text);
   }
 
-  Future<bool?> _showImportConfirmation(Recipe recipe) {
+  Future<void> _handleIncomingPayload(String rawPayload) async {
+    if (_isDialogOpen) return;
+
+    final Recipe decodedRecipe;
+    try {
+      decodedRecipe = ShareCodec.decode(rawPayload);
+      if (mounted && _errorMessage != null) {
+        setState(() => _errorMessage = null);
+      }
+    } on FormatException catch (e) {
+      if (!mounted) return;
+      setState(() => _errorMessage = e.message);
+      return;
+    }
+
+    _isDialogOpen = true;
+    await _stopCamera();
+    if (!mounted) {
+      _isDialogOpen = false;
+      return;
+    }
+
+    final shouldSave = await _showConfirmRecipeDialog(decodedRecipe);
+    _isDialogOpen = false;
+
+    if (!mounted) return;
+
+    if (shouldSave == true) {
+      await widget.appState.saveRecipe(decodedRecipe);
+      _codeController.clear();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('Saved "${decodedRecipe.title}" to your recipes.')));
+    }
+
+    if (mounted && widget.isActive) {
+      await _startCamera();
+    }
+  }
+
+  Future<bool?> _showConfirmRecipeDialog(Recipe recipe) {
     final isApple = widget.appState.isAppleStyle(context);
     final portionLabel = recipe.portions == 1 ? '1 portion' : '${recipe.portions} portions';
-    final summary = '$portionLabel · ${recipe.ingredients.length} ingredients · ${recipe.steps.length} steps';
+    final summary =
+        '${recipe.displayTitleWithAuthor}\n\n$portionLabel · ${recipe.ingredients.length} ingredients · ${recipe.steps.length} steps';
 
     if (isApple) {
       return showCupertinoDialog<bool>(
         context: context,
         builder: (ctx) => CupertinoAlertDialog(
-          title: const Text('Import Recipe?'),
-          content: Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text('"${recipe.displayTitleWithAuthor}"\n$summary'),
-          ),
+          title: const Text('Import Shared Recipe?'),
+          content: Padding(padding: const EdgeInsets.only(top: 8), child: Text(summary)),
           actions: [
             CupertinoDialogAction(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
             CupertinoDialogAction(
@@ -94,8 +191,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     return showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Import Recipe?'),
-        content: Text('"${recipe.displayTitleWithAuthor}"\n$summary'),
+        title: const Text('Import Shared Recipe?'),
+        content: Text(summary),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Save Recipe')),
@@ -107,144 +204,205 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   @override
   Widget build(BuildContext context) {
     final isApple = widget.appState.isAppleStyle(context);
+    final bottomSafeInset = MediaQuery.paddingOf(context).bottom;
     final primary = Theme.of(context).colorScheme.primary;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
 
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Receive Recipe',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Scan a QR code, paste a code, or import from AI.',
-                        style: Theme.of(context).textTheme.bodyMedium
-                            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (isApple)
-                  GestureDetector(
-                    onTap: _openImportFromAi,
-                    child: LiquidGlassContainer(
-                      borderRadius: BorderRadius.circular(18),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(CupertinoIcons.sparkles, size: 16, color: primary),
-                          const SizedBox(width: 6),
-                          Text(
-                            'AI Import',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: primary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  FilledButton.tonalIcon(
-                    onPressed: _openImportFromAi,
-                    icon: const Icon(Icons.auto_awesome, size: 18),
-                    label: const Text('Import From AI'),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                child: Stack(
-                  fit: StackFit.expand,
+      bottom: false,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, bottomSafeInset + 110),
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    MobileScanner(
-                      onDetect: (capture) {
-                        final code = capture.barcodes.firstOrNull?.rawValue;
-                        if (code != null) {
-                          _handleIncomingPayload(code);
-                        }
-                      },
+                    Text(
+                      'Receive Recipe',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
                     ),
-                    Center(
-                      child: Container(
-                        width: 230,
-                        height: 230,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: isApple ? Colors.white.withValues(alpha: 0.85) : primary, width: 3),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 16,
-                      left: 16,
-                      right: 16,
-                      child: isApple
-                          ? const LiquidGlassContainer(
-                              padding: EdgeInsets.all(12),
-                              child: Text('Align QR code inside the frame', textAlign: TextAlign.center),
-                            )
-                          : Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Text(
-                                  'Align QR code inside the frame',
-                                  textAlign: TextAlign.center,
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                              ),
-                            ),
+                    Text(
+                      'Scan a Cooking Monster QR code or paste a cm1: code.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
                     ),
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-            if (isApple)
-              GestureDetector(
-                onTap: _pasteFromClipboard,
-                child: LiquidGlassContainer(
-                  borderRadius: BorderRadius.circular(18),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(CupertinoIcons.doc_on_clipboard, size: 20, color: primary),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Paste Recipe Code from Clipboard',
-                        style: TextStyle(fontWeight: FontWeight.w600, color: primary),
+              if (widget.isActive)
+                ValueListenableBuilder<MobileScannerState>(
+                  valueListenable: _scannerController,
+                  builder: (context, state, _) {
+                    final torchOn = state.torchState == TorchState.on;
+                    return IconButton.filledTonal(
+                      tooltip: torchOn ? 'Turn Flash Off' : 'Turn Flash On',
+                      onPressed: () => _scannerController.toggleTorch(),
+                      icon: Icon(
+                        torchOn
+                            ? (isApple ? CupertinoIcons.bolt_fill : Icons.flash_on_rounded)
+                            : (isApple ? CupertinoIcons.bolt : Icons.flash_off_rounded),
                       ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              )
-            else
-              FilledButton.tonalIcon(
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                ),
-                onPressed: _pasteFromClipboard,
-                icon: const Icon(Icons.content_paste_go),
-                label: const Text('Paste Recipe Code from Clipboard'),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Camera Viewfinder (only mounted while Receive tab is active)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(26),
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: Container(
+                color: Colors.black,
+                child: widget.isActive
+                    ? Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          MobileScanner(
+                            controller: _scannerController,
+                            onDetect: _onBarcodeDetect,
+                            errorBuilder: (context, error, child) {
+                              return Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.videocam_off_rounded, color: Colors.white70, size: 36),
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        'Camera unavailable (${error.errorCode.name}).\nGrant camera access in Settings or paste a recipe code below.',
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          IgnorePointer(
+                            child: Center(
+                              child: Container(
+                                width: 210,
+                                height: 210,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(22),
+                                  border: Border.all(color: primary.withValues(alpha: 0.9), width: 3),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : const Center(child: Icon(Icons.qr_code_scanner_rounded, color: Colors.white38, size: 48)),
               ),
+            ),
+          ),
+
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.8),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                _errorMessage!,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
           ],
-        ),
+
+          const SizedBox(height: 18),
+
+          // Manual cm1: Payload Import Card
+          _wrapSection(
+            isApple: isApple,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Paste Recipe Code',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    TextButton.icon(
+                      onPressed: _pasteFromClipboard,
+                      icon: const Icon(Icons.content_paste_go, size: 18),
+                      label: const Text('Paste'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                if (isApple)
+                  CupertinoTextField(
+                    controller: _codeController,
+                    placeholder: 'cm1:eJxV...',
+                    maxLines: 2,
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.tertiarySystemFill.resolveFrom(context),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  )
+                else
+                  TextField(
+                    controller: _codeController,
+                    maxLines: 2,
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5),
+                    decoration: const InputDecoration(
+                      hintText: 'cm1:eJxV...',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(14))),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                if (isApple)
+                  CupertinoButton.filled(
+                    borderRadius: BorderRadius.circular(16),
+                    onPressed: () => _handleIncomingPayload(_codeController.text),
+                    child: const Text('Import Code'),
+                  )
+                else
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    onPressed: () => _handleIncomingPayload(_codeController.text),
+                    child: const Text('Import Code'),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _wrapSection({required bool isApple, required Widget child}) {
+    if (isApple) {
+      return LiquidGlassContainer(
+        borderRadius: BorderRadius.circular(24),
+        padding: const EdgeInsets.all(18),
+        child: child,
+      );
+    }
+
+    return Card.filled(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(padding: const EdgeInsets.all(18), child: child),
     );
   }
 }
