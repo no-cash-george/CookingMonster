@@ -1,89 +1,70 @@
 # Cooking Monster
 
-An offline-first, zero-backend personal recipe database and peer-to-peer recipe sharing application built with Flutter.
-
-Designed around kitchen practicality and zero cloud dependencies, **Cooking Monster** stores every recipe locally on your device and transfers dishes directly between phones using compressed, self-contained QR codes and clipboard payloads—no accounts, servers, or internet connection required.
+An offline-first, zero-telemetry recipe manager and peer-to-peer sharing utility built with Flutter and Dart. Cooking Monster stores your recipes, cook counts, and live kitchen progress locally—with adaptive native interfaces for Apple and Android platforms.
 
 ---
 
-## Core Features
+## Key Features
 
-### Dual Platform-Native UI Engines
-Powered directly by Flutter's **Impeller** rendering engine, the interface adapts to the host operating system's native visual language:
-* **iOS & macOS — Apple Liquid Glass:** Real-time Gaussian `BackdropFilter` blurs, translucent luminance gradients, `1px` specular rim borders, Cupertino controls, and a floating capsule navigation bar.
-* **Android — Material You (Material 3):** Dynamic tonal `ColorScheme` palettes, pill-indicator `NavigationBar`, filled cards, and an extended Material 3 `FloatingActionButton`.
-* **Runtime Engine & Theme Controls:** Switch between **Auto**, **iOS Glass**, and **Material You** live inside **Settings** (ideal for cross-platform UI testing in Chrome), alongside a 3-way Dark Mode toggle (**System**, **Always Off**, **Always On**).
-
-### Kitchen-First Recipe Management
-* **Personalized Onboarding:** First-launch setup collects your name, validated `@username` (`1–64` characters: letters, numbers, `_`, and `-`), and avatar selection (`Male`, `Female`, `Other`) mapped to custom home screen icons.
-* **Two-Step Recipe Wizard:**
-  1. **Step 1 — Metadata & Ingredients:** Set the recipe title, portion yield counter, and dynamic ingredient rows supporting both **grams (`g`)** and **piece counts (`pc` / `pcs`)** with optional preparation notes.
-  2. **Step 2 — Execution Steps:** Ordered, step-by-step cooking instructions.
-* **Interactive Cooking Checklist:** Open any recipe to check off *mise en place* ingredients while weighing and tap execution steps as you cook. Completing 100% of ingredients and steps triggers an animated **Congratulations** screen.
-* **Author Attribution:** Automatically stamps `created by @username` onto newly created recipes and preserves original attribution across shares and imports.
-
-### Serverless Peer-to-Peer Sharing (`cm1:` Codec)
-* **Share via QR or Clipboard:** Compresses recipes into a compact binary-backed payload (`cm1:<base64url(zlib(json))>`) and renders a high-contrast QR code alongside a one-tap **Copy Recipe Code** action.
-* **Receive via Camera or Paste:** Scan another device's QR code using the live camera viewfinder or paste a shared `cm1:` string from your clipboard, preview the dish summary, and save it straight to your local database.
+- **Local-First Architecture:** Powered by an embedded Sembast database and `SharedPreferences`. No cloud accounts, servers, or network connection required.
+- **Dual Native Adaptive UI:**
+  - **iOS & macOS:** Translucent Liquid Glass surfaces, Cupertino navigation, and native system styling.
+  - **Android:** Material You (Material 3) dynamic surfaces and components.
+  - **Appearance Customization:** System, Light, and Dark modes paired with an 8-swatch macOS-inspired accent color picker (Blue, Purple, Pink, Red, Orange, Yellow, Green, and Graphite).
+- **Interactive Kitchen Mode:**
+  - Live checkboxes for ingredients and execution steps that automatically persist across app restarts.
+  - Automatic cook counter (`timesMade`) that increments upon recipe completion, alongside manual `-`/`+` adjustments.
+- **Metric-Enforced Recipe Editor:** Two-step creation and editing workflow enforcing strict metric weights (`g`) or item counts (`pc`/`pcs`), portion yields, and preparation notes.
+- **Import from AI:** Generates a schema-enforced prompt for any external LLM and validates/sanitizes pasted JSON responses directly into your local recipe library.
+- **Serverless QR & Payload Sharing (`cm1:`):** Compresses recipes using ZLib + Base64URL into compact `cm1:` payloads for offline QR code generation and camera scanning—automatically stripping personal cook counts and active checklist progress prior to sharing.
+- **Full Backup & Restore:** Exports and imports complete JSON backups (chef profile, theme/accent preferences, recipes, cook counts, and checklist states) from either the initial startup screen or **Settings → Data & Backup** (supporting both **Merge** and **Replace** restore modes).
 
 ---
 
-## Wire Format & Compression
+## Tech Stack
 
-To keep QR codes low-density and fast for mobile cameras to focus on, recipes are serialized with single-character JSON keys, compressed with Zlib via the pure-Dart `archive` package (ensuring identical behavior across iOS, Android, and Web), and Base64URL-encoded:
-
-```text
-cm1:<Base64URL(Zlib(UTF-8 Compact JSON))>
-```
-
-| JSON Key | Field | Notes |
-| :--- | :--- | :--- |
-| `t` | Title | Recipe name (`String`) |
-| `c` | Created By | Sanitized `@username`, omitted if empty (`String`) |
-| `p` | Portions | Yield count, defaults to `1` (`int`) |
-| `i` | Ingredients | Array of compact ingredient objects |
-| `s` | Steps | Ordered array of instruction strings |
-| `i[].n` | Ingredient Name | `String` |
-| `i[].g` | Amount | Numeric quantity (`int` when whole, `double` otherwise) |
-| `i[].u` | Unit | `'c'` for piece count; omitted when stored in grams (`'g'`) |
-| `i[].m` | Note | Optional prep note (e.g., `"browned"`, `"diced"`), omitted if empty |
+| Layer | Technology |
+| :--- | :--- |
+| **Framework & Language** | Flutter (Dart SDK `^3.14.0`) |
+| **Local Persistence** | `sembast`, `sembast_web`, `shared_preferences` |
+| **QR & Compression** | `archive` (ZLib), `qr_flutter`, `mobile_scanner` |
+| **File I/O & Assets** | `file_picker`, `path_provider`, `flutter_launcher_icons` |
 
 ---
 
 ## Project Structure
 
 ```text
-cooking_monster/
-├── assets/
-│   └── icons/
-│       ├── male.png              # Custom home avatar (Male)
-│       ├── female.png            # Custom home avatar (Female)
-│       └── other.png             # Custom home avatar (Other)
-└── lib/
-    ├── main.dart                 # App entrypoint, theme configuration & routing
-    ├── models/
-    │   └── recipe.dart           # Recipe & Ingredient entities + compact JSON codec
-    ├── services/
-    │   ├── database_service.dart # Transactional Sembast CRUD layer
-    │   ├── db_factory_io.dart    # Native file-backed Sembast factory (iOS/Android)
-    │   ├── db_factory_web.dart   # IndexedDB-backed Sembast factory (Web testing)
-    │   ├── db_factory_stub.dart  # Conditional import stub
-    │   └── share_codec.dart      # Zlib + Base64URL encoder/decoder (cm1: protocol)
-    ├── state/
-    │   └── app_state.dart        # ChangeNotifier state, profile validation & persistence
-    └── ui/
-        ├── screens/
-        │   ├── main_shell.dart             # Platform navigation bar & floating Add button
-        │   ├── onboarding_screen.dart      # First-run profile setup
-        │   ├── recipes_screen.dart         # Home recipe list & personalized empty state
-        │   ├── recipe_detail_screen.dart   # Interactive cooking checklist view
-        │   ├── recipe_editor_screen.dart   # 2-step recipe creation & editing wizard
-        │   ├── recipe_complete_screen.dart # Completion celebration screen
-        │   ├── receive_screen.dart         # Live QR scanner & clipboard importer
-        │   └── settings_screen.dart        # Profile editor, Dark Mode & UI engine toggle
-        └── widgets/
-            ├── platform_primitives.dart    # LiquidGlassContainer & UserGenderAvatar
-            └── share_recipe_sheet.dart     # Modal QR generator & clipboard share sheet
+lib/
+├── main.dart                          # App entry point & adaptive ThemeData builder
+├── models/
+│   └── recipe.dart                    # Recipe & Ingredient models + cm1: serialization
+├── services/
+│   ├── ai_recipe_service.dart         # LLM prompt generator & strict JSON sanitizer
+│   ├── backup_export_io.dart          # Native mobile/desktop backup writer
+│   ├── backup_export_service.dart     # Full-app JSON backup serializer
+│   ├── backup_export_stub.dart        # Conditional import fallback
+│   ├── backup_export_web.dart         # Browser download backup exporter
+│   ├── backup_import_service.dart     # Backup parser & validation engine
+│   ├── database_service.dart          # Sembast database initialization & CRUD
+│   └── share_codec.dart               # ZLib + Base64URL cm1: encoder/decoder
+├── state/
+│   └── app_state.dart                 # Reactive state management & persistence layer
+└── ui/
+    ├── screens/
+    │   ├── ai_import_screen.dart      # Two-step AI prompt & JSON import flow
+    │   ├── main_shell.dart            # Adaptive bottom navigation & floating actions
+    │   ├── onboarding_screen.dart     # First-run profile setup & backup restore
+    │   ├── receive_screen.dart        # QR camera scanner & cm1: payload importer
+    │   ├── recipe_complete_screen.dart# Completion celebration & cook counter summary
+    │   ├── recipe_detail_screen.dart  # Persistent ingredient/step checklist view
+    │   ├── recipe_editor_screen.dart  # Two-step metric recipe creator/editor
+    │   ├── recipes_screen.dart        # Pinned header & recipe collection list
+    │   └── settings_screen.dart       # Profile, theme/accent picker & backup tools
+    └── widgets/
+        ├── import_backup_sheet.dart   # File picker & JSON paste restore modal
+        ├── platform_primitives.dart   # Liquid Glass container & avatar primitives
+        └── share_recipe_sheet.dart    # QR code & clipboard payload share modal
 ```
 
 ---
@@ -91,51 +72,88 @@ cooking_monster/
 ## Getting Started
 
 ### Prerequisites
-* **Flutter SDK** (`>= 3.24` / Dart `>= 3.5` recommended)
-* **Chrome** (for rapid UI and logic testing) or **Xcode / Android Studio** toolchains for native mobile builds
 
-### Installation
+- **Flutter SDK** (`3.50+` / Dart `^3.14.0`)
+- **For Android:** JDK 21 and Android SDK (Command-line Tools / Android Studio)
+- **For iOS:** macOS with Xcode, Xcode Command Line Tools, and CocoaPods (`brew install cocoapods`)
 
-1. **Clone the repository and install dependencies:**
+### Installation & Asset Setup
+
+1. Clone the repository and fetch Dart packages:
    ```bash
    git clone [https://github.com/no-cash-george/cooking_monster.git](https://github.com/no-cash-george/cooking_monster.git)
    cd cooking_monster
    flutter pub get
    ```
 
-2. **Add custom profile icons (optional):**
-   Place your PNG icons at:
-   * `assets/icons/male.png`
-   * `assets/icons/female.png`
-   * `assets/icons/other.png`
-   *(If omitted, the avatar widget gracefully falls back to platform-native person icons.)*
-
-3. **Run the application:**
-   * **Quick UI & workflow testing in Chrome:**
-     ```bash
-     flutter run -d chrome
-     ```
-   * **iOS or Android device / simulator:**
-     ```bash
-     flutter run
-     ```
+2. *(Optional)* Regenerate native iOS and Android launcher icons from `assets/app_icon/icon.png`:
+   ```bash
+   dart run flutter_launcher_icons
+   ```
 
 ---
 
-## Dependencies
+## Building for Android
 
-| Package | Purpose |
-| :--- | :--- |
-| `sembast` & `sembast_web` | Cross-platform local NoSQL database (file-backed on mobile, IndexedDB on Web) |
-| `path_provider` & `path` | Resolving native application documents directories for local database storage |
-| `shared_preferences` | Persisting onboarding state, user profile, and theme preferences |
-| `archive` | Pure-Dart Zlib compression/decompression across mobile and Web |
-| `qr_flutter` | Generating crisp QR codes for offline recipe sharing |
-| `mobile_scanner` | Hardware-accelerated camera QR code scanning |
-| `cupertino_icons` | Native iOS iconography |
+### Release APK (Direct Sideloading)
+
+```bash
+flutter build apk --release
+```
+The compiled binary is written to:
+```text
+build/app/outputs/flutter-apk/app-release.apk
+```
+
+### Android App Bundle (Google Play)
+
+```bash
+flutter build appbundle --release
+```
+The bundle is written to:
+```text
+build/app/outputs/bundle/release/app-release.aab
+```
 
 ---
 
-## License
+## Building for iOS
 
-This project is open-source and available under the [MIT License](LICENSE).
+### Option A: Direct Device Install via Xcode / CLI (Signed)
+
+1. Open the CocoaPods workspace in Xcode:
+   ```bash
+   open ios/Runner.xcworkspace
+   ```
+2. Select the **Runner** project → **Runner** target → **Signing & Capabilities**.
+3. Enable **Automatically manage signing**, select your **Team** (Apple ID), and set a unique **Bundle Identifier** if prompted.
+4. Connect your iPhone (with **Developer Mode** enabled under **Settings → Privacy & Security**) and deploy in release mode:
+   ```bash
+   flutter devices
+   flutter run --release -d <your-iphone-device-id>
+   ```
+5. On first launch with a free Personal Team certificate, trust your developer profile on the iPhone via **Settings → General → VPN & Device Management**.
+
+### Option B: Unsigned `.ipa` Package (AltStore / SideStore / Sideloadly)
+
+To produce a standalone `.ipa` without an Apple Developer Program distribution certificate:
+
+```bash
+flutter build ios --release --no-codesign
+mkdir -p build/ios/ipa/Payload
+cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+cd build/ios/ipa && zip -qry CookingMonster.ipa Payload
+```
+
+Install `build/ios/ipa/CookingMonster.ipa` onto your iOS device using **AltStore**, **SideStore**, or **Sideloadly**, which will handle provisioning and signing during installation.
+
+---
+
+## Automated Builds (GitHub Actions)
+
+Every push or pull request to `main` (as well as manual triggers via **Actions → Run workflow**) runs `.github/workflows/build.yml` to produce downloadable release artifacts:
+
+- **`CookingMonster.apk`:** Built on `ubuntu-latest` with JDK 21 and Flutter stable.
+- **`CookingMonster.ipa`:** Built on `macos-latest` (`--no-codesign`) and packaged into a sideload-ready IPA archive.
+
+*(Note: Production release builds compiled with `--release` automatically disable and hide the Settings UI-engine developer switcher via `kReleaseMode`.)*
