@@ -163,7 +163,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final bottomSafeInset = MediaQuery.paddingOf(context).bottom;
     final primary = Theme.of(context).colorScheme.primary;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    final selectedAccent = widget.appState.accentColor;
 
     return SafeArea(
       bottom: false,
@@ -260,98 +259,107 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
 
           // APPEARANCE SECTION (Theme Mode + macOS Accent Color Picker)
-          _wrapSection(
-            isApple: isApple,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Appearance',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Choose how Dark Mode behaves across the app.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
-                ),
-                const SizedBox(height: 14),
-                SegmentedButton<ThemeMode>(
-                  segments: const [
-                    ButtonSegment<ThemeMode>(value: ThemeMode.system, label: Text('System')),
-                    ButtonSegment<ThemeMode>(value: ThemeMode.light, label: Text('Always Off')),
-                    ButtonSegment<ThemeMode>(value: ThemeMode.dark, label: Text('Always On')),
-                  ],
-                  selected: <ThemeMode>{widget.appState.themeMode},
-                  onSelectionChanged: (selection) {
-                    widget.appState.setThemeMode(selection.first);
-                  },
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          ListenableBuilder(
+            listenable: widget.appState,
+            builder: (context, _) {
+              final selectedAccent = widget.appState.accentColor;
+              return _wrapSection(
+                isApple: isApple,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      'Accent Color',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                      'Appearance',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
                     ),
+                    const SizedBox(height: 4),
                     Text(
-                      selectedAccent.label,
-                      style: Theme.of(context).textTheme.labelMedium
-                          ?.copyWith(color: muted, fontWeight: FontWeight.w700),
+                      'Choose how Dark Mode behaves across the app.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+                    ),
+                    const SizedBox(height: 14),
+                    SegmentedButton<ThemeMode>(
+                      segments: const [
+                        ButtonSegment<ThemeMode>(value: ThemeMode.system, label: Text('System')),
+                        ButtonSegment<ThemeMode>(value: ThemeMode.light, label: Text('Always Off')),
+                        ButtonSegment<ThemeMode>(value: ThemeMode.dark, label: Text('Always On')),
+                      ],
+                      selected: <ThemeMode>{widget.appState.themeMode},
+                      onSelectionChanged: (selection) {
+                        widget.appState.setThemeMode(selection.first);
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Accent Color',
+                          style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          selectedAccent.label,
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(color: muted, fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: MacosAccentColor.values.map((accent) {
+                        final isSelected = selectedAccent == accent;
+                        return Semantics(
+                          button: true,
+                          selected: isSelected,
+                          label: '${accent.label} accent color',
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => widget.appState.setAccentColor(accent),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              width: 36,
+                              height: 36,
+                              padding: const EdgeInsets.all(2.5),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: isSelected ? accent.color : Colors.transparent, width: 2.2),
+                              ),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: accent.color,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.14),
+                                      blurRadius: 3,
+                                      offset: const Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                                child: isSelected
+                                    ? Center(
+                                        child: Container(
+                                          width: 9,
+                                          height: 9,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: accent.useDarkForeground ? Colors.black : Colors.white,
+                                          ),
+                                        ),
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: MacosAccentColor.values.map((accent) {
-                    final isSelected = selectedAccent == accent;
-                    return Tooltip(
-                      message: accent.label,
-                      child: GestureDetector(
-                        onTap: () => widget.appState.setAccentColor(accent),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          width: 34,
-                          height: 34,
-                          padding: const EdgeInsets.all(2.5),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: isSelected ? accent.color : Colors.transparent, width: 2.2),
-                          ),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: accent.color,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.14),
-                                  blurRadius: 3,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                            child: isSelected
-                                ? Center(
-                                    child: Container(
-                                      width: 9,
-                                      height: 9,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: accent.useDarkForeground ? Colors.black : Colors.white,
-                                      ),
-                                    ),
-                                  )
-                                : null,
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
+              );
+            },
           ),
 
           const SizedBox(height: 16),
@@ -386,7 +394,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
                           ),
                           Text(
-                            'Export or restore all recipes, cook counts, and settings via .cmonu files.',
+                            'Export or restore all recipes, cook counts, and settings.',
                             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
                           ),
                         ],

@@ -1,5 +1,4 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'state/app_state.dart';
@@ -19,14 +18,25 @@ class CookingMonsterApp extends StatelessWidget {
 
   ThemeData _buildTheme(Brightness brightness) {
     final accent = appState.accentColor;
+    final isDark = brightness == Brightness.dark;
     final baseScheme = ColorScheme.fromSeed(seedColor: accent.color, brightness: brightness);
 
-    final effectivePlatform = appState.platformOverride ?? defaultTargetPlatform;
-    final isApplePlatform = effectivePlatform == TargetPlatform.iOS || effectivePlatform == TargetPlatform.macOS;
+    final onAccent = accent.useDarkForeground ? Colors.black : Colors.white;
+    final containerColor = accent.color.withValues(alpha: isDark ? 0.28 : 0.16);
+    final onContainerColor = isDark
+        ? Color.lerp(accent.color, Colors.white, 0.72)!
+        : Color.lerp(accent.color, Colors.black, 0.58)!;
 
-    final scheme = isApplePlatform
-        ? baseScheme.copyWith(primary: accent.color, onPrimary: accent.useDarkForeground ? Colors.black : Colors.white)
-        : baseScheme;
+    final scheme = baseScheme.copyWith(
+      primary: accent.color,
+      onPrimary: onAccent,
+      primaryContainer: containerColor,
+      onPrimaryContainer: onContainerColor,
+      secondary: accent.color,
+      onSecondary: onAccent,
+      secondaryContainer: containerColor,
+      onSecondaryContainer: onContainerColor,
+    );
 
     return ThemeData(
       useMaterial3: true,
@@ -36,7 +46,7 @@ class CookingMonsterApp extends StatelessWidget {
       cupertinoOverrideTheme: CupertinoThemeData(
         brightness: brightness,
         primaryColor: accent.color,
-        primaryContrastingColor: accent.useDarkForeground ? Colors.black : Colors.white,
+        primaryContrastingColor: onAccent,
       ),
     );
   }
