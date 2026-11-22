@@ -18,96 +18,16 @@ class ReceiveScreen extends StatefulWidget {
   State<ReceiveScreen> createState() => _ReceiveScreenState();
 }
 
-class _ReceiveScreenState extends State<ReceiveScreen> with WidgetsBindingObserver {
-  late final MobileScannerController _scannerController;
+class _ReceiveScreenState extends State<ReceiveScreen> {
   final TextEditingController _codeController = TextEditingController();
-
-  bool _isCameraActive = false;
+  MobileScannerController? _activeController;
   bool _isDialogOpen = false;
   String? _errorMessage;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _scannerController = MobileScannerController(
-      autoStart: false,
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      formats: const [BarcodeFormat.qrCode],
-    );
-
-    if (widget.isActive) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && widget.isActive) {
-          _startCamera();
-        }
-      });
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant ReceiveScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isActive != oldWidget.isActive) {
-      if (widget.isActive) {
-        _startCamera();
-      } else {
-        _stopCamera();
-      }
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!widget.isActive) return;
-
-    if (state == AppLifecycleState.resumed) {
-      _startCamera();
-    } else if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
-      _stopCamera();
-    }
-  }
-
-  Future<void> _startCamera() async {
-    if (_isCameraActive || !mounted || !widget.isActive) return;
-    _isCameraActive = true;
-    try {
-      await _scannerController.start();
-    } catch (_) {
-      _isCameraActive = false;
-    }
-  }
-
-  Future<void> _stopCamera() async {
-    if (!_isCameraActive) return;
-    _isCameraActive = false;
-    try {
-      await _scannerController.stop();
-    } catch (_) {
-      // Ignore stop errors if the platform view was already torn down.
-    }
-  }
-
-  @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _codeController.dispose();
-    _scannerController.dispose();
     super.dispose();
-  }
-
-  void _onBarcodeDetect(BarcodeCapture capture) {
-    if (!widget.isActive || _isDialogOpen) return;
-
-    for (final barcode in capture.barcodes) {
-      final raw = barcode.rawValue;
-      if (raw != null && raw.trim().startsWith('cm1:')) {
-        _handleIncomingPayload(raw.trim());
-        break;
-      }
-    }
   }
 
   Future<void> _pasteFromClipboard() async {
@@ -138,17 +58,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> with WidgetsBindingObserv
       return;
     }
 
-    _isDialogOpen = true;
-    await _stopCamera();
-    if (!mounted) {
-      _isDialogOpen = false;
-      return;
-    }
+    setState(() => _isDialogOpen = true);
 
     final shouldSave = await _showConfirmRecipeDialog(decodedRecipe);
-    _isDialogOpen = false;
 
     if (!mounted) return;
+    setState(() => _isDialogOpen = false);
 
     if (shouldSave == true) {
       await widget.appState.saveRecipe(decodedRecipe);
@@ -157,10 +72,6 @@ class _ReceiveScreenState extends State<ReceiveScreen> with WidgetsBindingObserv
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text('Saved "${decodedRecipe.title}" to your recipes.')));
-    }
-
-    if (mounted && widget.isActive) {
-      await _startCamera();
     }
   }
 
@@ -207,6 +118,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> with WidgetsBindingObserv
     final bottomSafeInset = MediaQuery.paddingOf(context).bottom;
     final primary = Theme.of(context).colorScheme.primary;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final shouldRunCamera = widget.isActive && !_isDialogOpen;
+    final controller = _activeController;
 
     return SafeArea(
       bottom: false,
@@ -230,14 +143,14 @@ class _ReceiveScreenState extends State<ReceiveScreen> with WidgetsBindingObserv
                   ],
                 ),
               ),
-              if (widget.isActive)
+              if (shouldRunCamera && controller != null)
                 ValueListenableBuilder<MobileScannerState>(
-                  valueListenable: _scannerController,
+                  valueListenable: controller,
                   builder: (context, state, _) {
                     final torchOn = state.torchState == TorchState.on;
                     return IconButton.filledTonal(
                       tooltip: torchOn ? 'Turn Flash Off' : 'Turn Flash On',
-                      onPressed: () => _scannerController.toggleTorch(),
+                      onPressed: () => controller.toggleTorch(),
                       icon: Icon(
                         torchOn
                             ? (isApple ? CupertinoIcons.bolt_fill : Icons.flash_on_rounded)
@@ -250,53 +163,25 @@ class _ReceiveScreenState extends State<ReceiveScreen> with WidgetsBindingObserv
           ),
           const SizedBox(height: 16),
 
-          // Camera Viewfinder (only mounted while Receive tab is active)
+          // Camera Viewfinder (mounted strictly while Receive tab is active)
           ClipRRect(
             borderRadius: BorderRadius.circular(26),
             child: AspectRatio(
               aspectRatio: 1,
               child: Container(
                 color: Colors.black,
-                child: widget.isActive
-                    ? Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          MobileScanner(
-                            controller: _scannerController,
-                            onDetect: _onBarcodeDetect,
-                            errorBuilder: (context, error, child) {
-                              return Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(24),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.videocam_off_rounded, color: Colors.white70, size: 36),
-                                      const SizedBox(height: 10),
-                                      Text(
-                                        'Camera unavailable (${error.errorCode.name}).\nGrant camera access in Settings or paste a recipe code below.',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(color: Colors.white70, fontSize: 13),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                          IgnorePointer(
-                            child: Center(
-                              child: Container(
-                                width: 210,
-                                height: 210,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(22),
-                                  border: Border.all(color: primary.withValues(alpha: 0.9), width: 3),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                child: shouldRunCamera
+                    ? _ActiveQrScannerView(
+                        primaryColor: primary,
+                        onControllerChanged: (ctrl) {
+                          if (!mounted) return;
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted && _activeController != ctrl) {
+                              setState(() => _activeController = ctrl);
+                            }
+                          });
+                        },
+                        onPayloadDetected: _handleIncomingPayload,
                       )
                     : const Center(child: Icon(Icons.qr_code_scanner_rounded, color: Colors.white38, size: 48)),
               ),
@@ -403,6 +288,112 @@ class _ReceiveScreenState extends State<ReceiveScreen> with WidgetsBindingObserv
     return Card.filled(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Padding(padding: const EdgeInsets.all(18), child: child),
+    );
+  }
+}
+
+class _ActiveQrScannerView extends StatefulWidget {
+  final Color primaryColor;
+  final ValueChanged<MobileScannerController?> onControllerChanged;
+  final Future<void> Function(String payload) onPayloadDetected;
+
+  const _ActiveQrScannerView({
+    required this.primaryColor,
+    required this.onControllerChanged,
+    required this.onPayloadDetected,
+  });
+
+  @override
+  State<_ActiveQrScannerView> createState() => _ActiveQrScannerViewState();
+}
+
+class _ActiveQrScannerViewState extends State<_ActiveQrScannerView> with WidgetsBindingObserver {
+  late final MobileScannerController _controller;
+  DateTime _lastScanAt = DateTime.fromMillisecondsSinceEpoch(0);
+  String? _lastScanValue;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _controller = MobileScannerController(detectionSpeed: DetectionSpeed.normal, formats: const [BarcodeFormat.qrCode]);
+    widget.onControllerChanged(_controller);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _controller.start();
+    } else if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _controller.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.onControllerChanged(null);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    final now = DateTime.now();
+    for (final barcode in capture.barcodes) {
+      final raw = barcode.rawValue?.trim();
+      if (raw == null || raw.isEmpty) continue;
+
+      final isSameRecent = raw == _lastScanValue && now.difference(_lastScanAt) < const Duration(seconds: 2);
+      if (isSameRecent) return;
+
+      _lastScanValue = raw;
+      _lastScanAt = now;
+      widget.onPayloadDetected(raw);
+      break;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        MobileScanner(
+          controller: _controller,
+          onDetect: _onDetect,
+          errorBuilder: (context, error, child) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.videocam_off_rounded, color: Colors.white70, size: 36),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Camera unavailable (${error.errorCode.name}).\nGrant camera permission in Android Settings or paste a recipe code below.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        IgnorePointer(
+          child: Center(
+            child: Container(
+              width: 210,
+              height: 210,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: widget.primaryColor.withValues(alpha: 0.9), width: 3),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
