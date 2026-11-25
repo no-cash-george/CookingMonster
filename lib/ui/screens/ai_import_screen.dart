@@ -124,6 +124,8 @@ class _AiImportScreenState extends State<AiImportScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Import from AI')),
       body: SafeArea(
+        top: false,
+        bottom: false,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
           children: [
