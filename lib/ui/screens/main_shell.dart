@@ -42,6 +42,7 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final isApple = widget.appState.isAppleStyle(context);
     final bottomSafeInset = MediaQuery.paddingOf(context).bottom;
+    final navBottomPadding = bottomSafeInset > 0 ? 14.0 : 10.0;
 
     final pages = [
       RecipesScreen(appState: widget.appState),
@@ -59,7 +60,7 @@ class _MainShellState extends State<MainShell> {
               Positioned(
                 left: 20,
                 right: 20,
-                bottom: bottomSafeInset + 92,
+                bottom: navBottomPadding + 72,
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: FittedBox(
@@ -117,38 +118,36 @@ class _MainShellState extends State<MainShell> {
               ),
           ],
         ),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-            child: LiquidGlassContainer(
-              borderRadius: BorderRadius.circular(32),
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _AppleNavItem(
-                    icon: CupertinoIcons.book,
-                    activeIcon: CupertinoIcons.book_fill,
-                    label: 'Recipes',
-                    selected: _selectedIndex == 0,
-                    onTap: () => setState(() => _selectedIndex = 0),
-                  ),
-                  _AppleNavItem(
-                    icon: CupertinoIcons.qrcode_viewfinder,
-                    activeIcon: CupertinoIcons.qrcode_viewfinder,
-                    label: 'Receive',
-                    selected: _selectedIndex == 1,
-                    onTap: () => setState(() => _selectedIndex = 1),
-                  ),
-                  _AppleNavItem(
-                    icon: CupertinoIcons.gear,
-                    activeIcon: CupertinoIcons.gear_solid,
-                    label: 'Settings',
-                    selected: _selectedIndex == 2,
-                    onTap: () => setState(() => _selectedIndex = 2),
-                  ),
-                ],
-              ),
+        bottomNavigationBar: Padding(
+          padding: EdgeInsets.fromLTRB(20, 0, 20, navBottomPadding),
+          child: LiquidGlassContainer(
+            borderRadius: BorderRadius.circular(32),
+            padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _AppleNavItem(
+                  icon: CupertinoIcons.book,
+                  activeIcon: CupertinoIcons.book_fill,
+                  label: 'Recipes',
+                  selected: _selectedIndex == 0,
+                  onTap: () => setState(() => _selectedIndex = 0),
+                ),
+                _AppleNavItem(
+                  icon: CupertinoIcons.qrcode_viewfinder,
+                  activeIcon: CupertinoIcons.qrcode_viewfinder,
+                  label: 'Receive',
+                  selected: _selectedIndex == 1,
+                  onTap: () => setState(() => _selectedIndex = 1),
+                ),
+                _AppleNavItem(
+                  icon: CupertinoIcons.gear,
+                  activeIcon: CupertinoIcons.gear_solid,
+                  label: 'Settings',
+                  selected: _selectedIndex == 2,
+                  onTap: () => setState(() => _selectedIndex = 2),
+                ),
+              ],
             ),
           ),
         ),
@@ -236,7 +235,7 @@ class _AppleNavItem extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           color: selected ? activeColor.withValues(alpha: 0.14) : Colors.transparent,

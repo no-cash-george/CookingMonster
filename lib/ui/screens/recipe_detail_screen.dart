@@ -2,11 +2,14 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/recipe.dart';
+import '../../services/cup_conversion_service.dart';
 import '../../state/app_state.dart';
 import '../widgets/platform_primitives.dart';
 import '../widgets/share_recipe_sheet.dart';
 import 'recipe_complete_screen.dart';
 import 'recipe_editor_screen.dart';
+
+enum _IngredientDisplayMode { grams, cupsAndSpoons }
 
 class RecipeDetailScreen extends StatefulWidget {
   final AppState appState;
@@ -19,6 +22,41 @@ class RecipeDetailScreen extends StatefulWidget {
 }
 
 class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
+  _IngredientDisplayMode _displayMode = _IngredientDisplayMode.grams;
+  final Map<String, CupConversionResult> _resolvedConversions = {};
+  bool _isResolvingVolume = false;
+
+  String _conversionCacheKey(Ingredient ing) => '${ing.name.trim().toLowerCase()}|${ing.amount}';
+
+  Future<void> _setDisplayMode(_IngredientDisplayMode mode, Recipe recipe) async {
+    setState(() => _displayMode = mode);
+    if (mode == _IngredientDisplayMode.cupsAndSpoons) {
+      await _resolveAllVolumeConversions(recipe);
+    }
+  }
+
+  Future<void> _resolveAllVolumeConversions(Recipe recipe) async {
+    if (_isResolvingVolume) return;
+    setState(() => _isResolvingVolume = true);
+
+    await CupConversionService.preloadCache();
+
+    for (final ing in recipe.ingredients) {
+      if (ing.unit != IngredientUnit.grams) continue;
+      final key = _conversionCacheKey(ing);
+      // Prioritizes Online -> Cached -> Local Table
+      final result = await CupConversionService.convertAsync(ingredientName: ing.name, grams: ing.amount);
+      if (!mounted) return;
+      setState(() {
+        _resolvedConversions[key] = result;
+      });
+    }
+
+    if (mounted) {
+      setState(() => _isResolvingVolume = false);
+    }
+  }
+
   Future<void> _toggleIngredient(Recipe recipe, int index) async {
     final nextIngredients = Set<int>.from(recipe.checkedIngredients);
     if (!nextIngredients.remove(index)) {
@@ -111,7 +149,9 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
 
         final isApple = widget.appState.isAppleStyle(context);
         final primary = Theme.of(context).colorScheme.primary;
+        final muted = Theme.of(context).colorScheme.onSurfaceVariant;
         final portionLabel = recipe.portions == 1 ? '1 portion' : '${recipe.portions} portions';
+        final hasGramIngredients = recipe.ingredients.any((i) => i.unit == IngredientUnit.grams);
 
         return Scaffold(
           appBar: AppBar(
@@ -130,6 +170,8 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
             ],
           ),
           body: SafeArea(
+            top: false,
+            bottom: false,
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
               children: [
@@ -140,8 +182,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                 const SizedBox(height: 6),
                 Text(
                   '$portionLabel · ${recipe.ingredients.length} ingredients · ${recipe.steps.length} steps',
-                  style: Theme.of(context).textTheme.bodyMedium
-                      ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: muted),
                 ),
                 const SizedBox(height: 14),
                 _wrapSurface(
@@ -178,11 +219,23 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                 ),
                 const SizedBox(height: 22),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Ingredients',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'Ingredients',
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          if (_isResolvingVolume) ...[
+                            const SizedBox(width: 8),
+                            const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                          ],
+                        ],
+                      ),
                     ),
                     if (recipe.checkedIngredients.isNotEmpty)
                       TextButton(
@@ -193,6 +246,14 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                         ),
                         child: const Text('Reset'),
                       ),
+                    if (hasGramIngredients) ...[
+                      const SizedBox(width: 4),
+                      _UnitDisplayToggle(
+                        mode: _displayMode,
+                        isApple: isApple,
+                        onChanged: (mode) => _setDisplayMode(mode, recipe),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -269,6 +330,12 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
     final primary = Theme.of(context).colorScheme.primary;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
 
+    final showVolume = _displayMode == _IngredientDisplayMode.cupsAndSpoons && ingredient.unit == IngredientUnit.grams;
+    final conversion = showVolume
+        ? (_resolvedConversions[_conversionCacheKey(ingredient)] ??
+              CupConversionService.convertSync(ingredientName: ingredient.name, grams: ingredient.amount))
+        : null;
+
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -297,6 +364,14 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                   ),
                   if (ingredient.note != null && ingredient.note!.isNotEmpty)
                     Text(ingredient.note!, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted)),
+                  if (conversion != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '${ingredient.formattedAmount} · ${conversion.source.label}',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: muted),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -308,7 +383,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                ingredient.formattedAmount,
+                conversion != null ? conversion.formattedVolume : ingredient.formattedAmount,
                 style: TextStyle(fontWeight: FontWeight.w700, color: checked ? muted : primary),
               ),
             ),
@@ -381,6 +456,56 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: padding != null ? Padding(padding: padding, child: child) : child,
+    );
+  }
+}
+
+class _UnitDisplayToggle extends StatelessWidget {
+  final _IngredientDisplayMode mode;
+  final bool isApple;
+  final ValueChanged<_IngredientDisplayMode> onChanged;
+
+  const _UnitDisplayToggle({required this.mode, required this.isApple, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final onPrimary = Theme.of(context).colorScheme.onPrimary;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final bg = isApple
+        ? CupertinoColors.tertiarySystemFill.resolveFrom(context)
+        : Theme.of(context).colorScheme.surfaceContainerHighest;
+
+    Widget buildChip(_IngredientDisplayMode target, String label) {
+      final selected = mode == target;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => onChanged(target),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: selected ? primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5, color: selected ? onPrimary : muted),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(2.5),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(11)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          buildChip(_IngredientDisplayMode.grams, 'g'),
+          buildChip(_IngredientDisplayMode.cupsAndSpoons, 'Cups & Spoons'),
+        ],
+      ),
     );
   }
 }

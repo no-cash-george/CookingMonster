@@ -250,6 +250,7 @@ class _RecipeEditorScreenState extends State<RecipeEditorScreen> {
 
   Widget _buildStepOne(BuildContext context, bool isApple) {
     final primary = Theme.of(context).colorScheme.primary;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -322,7 +323,11 @@ class _RecipeEditorScreenState extends State<RecipeEditorScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        Text(
+          'Recipes are written strictly in grams (g) and pieces (pcs). Cup conversions are available automatically while viewing a recipe.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+        ),
+        const SizedBox(height: 10),
         for (int i = 0; i < _ingredientRows.length; i++) ...[
           _wrapCard(
             isApple: isApple,
@@ -364,7 +369,7 @@ class _RecipeEditorScreenState extends State<RecipeEditorScreen> {
                         controller: _ingredientRows[i].amountController,
                         hint: _ingredientRows[i].unit == IngredientUnit.grams
                             ? 'Weight in grams (g)'
-                            : 'Count (e.g., 2)',
+                            : 'Count in pieces (pcs)',
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       ),
                     ),
